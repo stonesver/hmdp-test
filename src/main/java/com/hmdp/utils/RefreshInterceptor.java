@@ -38,7 +38,6 @@ public class RefreshInterceptor implements HandlerInterceptor {
                 .entries(tokenKey);
         //存在
         //将查询的Hash转换为UserDTO对象
-        System.out.println(111);
         UserDTO userDTO = BeanUtil.fillBeanWithMap(map,new UserDTO(),false);
         // 保存用户到ThreadLocal
         UserHolder.saveUser(userDTO);
