@@ -32,7 +32,6 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         String key=CACHE_SHOP_KEY+id;
         //查询缓存
         String shopJSON =  stringRedisTemplate.opsForValue().get(key);
-        System.out.println("222");
         //命中，转换成对象直接返回
         if(StrUtil.isNotBlank(shopJSON)){
             Shop shop = JSONUtil.toBean(shopJSON,Shop.class);
