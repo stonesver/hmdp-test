@@ -8,6 +8,7 @@ import com.hmdp.dto.Result;
 import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
 import com.hmdp.service.IShopService;
+import com.hmdp.utils.CacheCilent;
 import com.mysql.cj.util.TimeUtil;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -32,13 +33,19 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     @Resource
     private StringRedisTemplate stringRedisTemplate;
 
+    @Resource
+    private CacheCilent cacheCilent;
+
     @Override
     public Result queryByid(Long id) {
         //缓存穿透
+        //使用封装好的工具类
+        //Shop shop = cacheCilent.queryWithPassThrough(CACHE_SHOP_KEY,id,Shop.class,this::getById,CACHE_SHOP_TTL,TimeUnit.MINUTES);
         //Shop shop = queryWithPassThrough(id);
 
         //互斥锁解决缓存击穿
-        Shop shop=queryWithLock(id);
+        //Shop shop=queryWithLock(id);
+        Shop shop = cacheCilent.queryWithLogicalExpire(CACHE_SHOP_KEY,id,Shop.class,this::getById,20L,TimeUnit.MINUTES);
         if(shop==null){
             return Result.fail("店铺不存在！");
         }
@@ -46,7 +53,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         return Result.ok(shop);
 
     }
-    //缓存穿透
+    //缓存穿透，已被封装成RedisCilent中的工具
     public Shop queryWithPassThrough(Long id){
         String key=CACHE_SHOP_KEY+id;
         //查询缓存
@@ -73,57 +80,57 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         return shop;
     }
     //缓存击穿
-    public Shop queryWithLock(Long id) {
-        String key=CACHE_SHOP_KEY+id;
-        Shop shop = null;
-        //查询缓存
-        String shopJSON =  stringRedisTemplate.opsForValue().get(key);
-        //命中，转换成对象直接返回
-        if(StrUtil.isNotBlank(shopJSON)){
-            return JSONUtil.toBean(shopJSON,Shop.class);
-        }
-        //命中是空
-        if(shopJSON!=null){
-            return null;
-        }
-        //缓存重建
-        String lockKey = LOCK_SHOP_KEY+id;
-        try {
-            boolean isLock=tryLock(lockKey);
-            //获取锁失败则递归重试
-            if(!isLock){
-                Thread.sleep(50);
-                return queryWithLock(id);
-            }
-            //未命中，查询数据库
-            shop=getById(id);
-            //模拟延迟
-            Thread.sleep(200);
-            //不存在，返回错误
-            if(shop==null){
-                //解决缓存穿透，使用空值写入缓存
-                stringRedisTemplate.opsForValue().set(key,"",CACHE_NULL_TTL, TimeUnit.MINUTES);
-                return null;
-            }
-            //数据库存在，写入redis缓存，并返回
-            stringRedisTemplate.opsForValue().set(key,JSONUtil.toJsonStr(shop),CACHE_SHOP_TTL, TimeUnit.MINUTES);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        } finally {
-            //释放锁
-            unLock(lockKey);
-        }
-        return shop;
-    }
+//    public Shop queryWithLock(Long id) {
+//        String key=CACHE_SHOP_KEY+id;
+//        Shop shop = null;
+//        //查询缓存
+//        String shopJSON =  stringRedisTemplate.opsForValue().get(key);
+//        //命中，转换成对象直接返回
+//        if(StrUtil.isNotBlank(shopJSON)){
+//            return JSONUtil.toBean(shopJSON,Shop.class);
+//        }
+//        //命中是空
+//        if(shopJSON!=null){
+//            return null;
+//        }
+//        //缓存重建
+//        String lockKey = LOCK_SHOP_KEY+id;
+//        try {
+//            boolean isLock=tryLock(lockKey);
+//            //获取锁失败则递归重试
+//            if(!isLock){
+//                Thread.sleep(50);
+//                return queryWithLock(id);
+//            }
+//            //未命中，查询数据库
+//            shop=getById(id);
+//            //模拟延迟
+//            Thread.sleep(200);
+//            //不存在，返回错误
+//            if(shop==null){
+//                //解决缓存穿透，使用空值写入缓存
+//                stringRedisTemplate.opsForValue().set(key,"",CACHE_NULL_TTL, TimeUnit.MINUTES);
+//                return null;
+//            }
+//            //数据库存在，写入redis缓存，并返回
+//            stringRedisTemplate.opsForValue().set(key,JSONUtil.toJsonStr(shop),CACHE_SHOP_TTL, TimeUnit.MINUTES);
+//        } catch (InterruptedException e) {
+//            throw new RuntimeException(e);
+//        } finally {
+//            //释放锁
+//            unLock(lockKey);
+//        }
+//        return shop;
+//    }
 
-    //声明自定义锁
-    private boolean tryLock(String key){
-        Boolean res = stringRedisTemplate.opsForValue().setIfAbsent(key,"1",10,TimeUnit.MINUTES);
-        return BooleanUtil.isTrue(res);
-    }
-    private void unLock(String key){
-       stringRedisTemplate.delete(key);
-    }
+//    //声明自定义锁
+//    private boolean tryLock(String key){
+//        Boolean res = stringRedisTemplate.opsForValue().setIfAbsent(key,"1",10,TimeUnit.MINUTES);
+//        return BooleanUtil.isTrue(res);
+//    }
+//    private void unLock(String key){
+//       stringRedisTemplate.delete(key);
+//    }
 
     //事务控制缓存数据库一致性
     @Override
