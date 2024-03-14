@@ -8,8 +8,10 @@ import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.hmdp.utils.RedisWorker;
+import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
 import org.springframework.aop.framework.AopContext;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +31,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Resource
     private ISeckillVoucherService seckillVoucherService;
+
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
 
     @Resource
     private  RedisWorker redisWorker;
@@ -54,16 +59,37 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         Long  userId = UserHolder.getUser().getId();
         //悲观锁实现一人一单
         //锁放在函数外，防止当函数执行完时事务未提交而导致其他线程进入
-        synchronized (userId.toString().intern()){
-            //代理对象，确保事务生效
-            //直接使用this.function()使用的是直接对象，@Transactional则是spring使用代理对象生效的
-            //需要加入依赖aspectjweaver
-            //并在启动类中添加注解@EnableAspectJAutoProxy(exposeProxy = true) 来暴露代理对象
+//        synchronized (userId.toString().intern()){
+//            //代理对象，确保事务生效
+//            //直接使用this.function()使用的是直接对象，@Transactional则是spring使用代理对象生效的
+//            //需要加入依赖aspectjweaver
+//            //并在启动类中添加注解@EnableAspectJAutoProxy(exposeProxy = true) 来暴露代理对象
+//            IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
+//            return proxy.CreateOrder(voucherId);
+//        }
+
+        //在单体下没问题，但是在集群下仍然会有线程安全问题
+        //因为集群下多个jvm有多个锁监视器，在一台上的锁不会影响另一台
+        // 因此需要使用分布式锁：
+
+        //针对用户锁订单，用用户id来拼接
+        SimpleRedisLock lock = new SimpleRedisLock("order:"+userId,stringRedisTemplate);
+        //获取锁
+        boolean isLock= lock.tryLock(1200);
+        //判断获取是否成功
+        if(!isLock){
+            //失败结束
+            return Result.fail("不允许重复下单");
+        }
+        //成功执行业务
+        try {
             IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
             return proxy.CreateOrder(voucherId);
+        } finally {
+            //释放锁之前要判断是否是自己的锁（线程id）
+            //注意不同的jvm线程id可能冲突，要使用uuid进行区分
+            lock.unlock();
         }
-        //在单体下没问题，但是在集群下仍然会有线程安全问题
-        //因为集群下多个jvm有多个锁监视器，在一台上的锁不会影响另一台,需要使用分布式锁
     }
     @Transactional
     public Result CreateOrder(Long voucherId){
