@@ -10,6 +10,8 @@ import com.hmdp.service.IVoucherOrderService;
 import com.hmdp.utils.RedisWorker;
 import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -34,6 +36,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+
+    @Resource
+    private RedissonClient redissonClient;
 
     @Resource
     private  RedisWorker redisWorker;
@@ -73,9 +78,11 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         // 因此需要使用分布式锁：
 
         //针对用户锁订单，用用户id来拼接
-        SimpleRedisLock lock = new SimpleRedisLock("order:"+userId,stringRedisTemplate);
+        //SimpleRedisLock lock = new SimpleRedisLock("order:"+userId,stringRedisTemplate);
+        //使用Redisson获取分布式锁,可重入(底层使用lua脚本)
+        RLock lock = redissonClient.getLock("lock:order:"+userId);
         //获取锁
-        boolean isLock= lock.tryLock(1200);
+        boolean isLock= lock.tryLock();
         //判断获取是否成功
         if(!isLock){
             //失败结束
