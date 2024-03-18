@@ -47,6 +47,11 @@ public class BlogController {
         return blogService.likeBlog(id);
     }
 
+    @GetMapping("/likes/{id}")
+    public Result queryBlogSort(@PathVariable("id") Long id){
+        return  blogService.queryBlogSort(id);
+    }
+
     @GetMapping("/of/me")
     public Result queryMyBlog(@RequestParam(value = "current", defaultValue = "1") Integer current) {
         // 获取登录用户
